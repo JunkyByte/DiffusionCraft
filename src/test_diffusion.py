@@ -55,7 +55,7 @@ def load_model_from_config(config, ckpt, device=torch.device("cuda"), verbose=Fa
 if __name__ == '__main__':
     seed_everything(42)
 
-    config = OmegaConf.load('src/v2-1-stable-unclip-h-bind-inference.yaml')
+    config = OmegaConf.load('src/v2-inference.yaml')
     device = torch.device('cuda') # if opt.device == 'cuda' else torch.device('cpu')
     model = load_model_from_config(config, '/home/adryw/dataset/imagecraft/sd21-unclip-h.ckpt', device)
 
@@ -75,8 +75,8 @@ if __name__ == '__main__':
     # wm_encoder.set_watermark('bytes', wm.encode('utf-8'))
 
     # Hardcoded batches and prompts (can be read from file)
-    batch_size = 9
-    n_rows = 3
+    batch_size = 2
+    n_rows = 1
     prompt = 'Angela Merkel killing a nazi dinosaur!'
     data = [batch_size * [prompt]]
 
@@ -97,6 +97,7 @@ if __name__ == '__main__':
     scale = 9
 
     start_code = torch.randn([batch_size, *shape], device=device)
+    additional_context = torch.cpu.amp.autocast()
 
     # Warmup
     prompts = data[0]
@@ -107,8 +108,7 @@ if __name__ == '__main__':
     if isinstance(prompts, tuple):
         prompts = list(prompts)
 
-
-    with torch.no_grad():
+    with torch.no_grad(), additional_context:
         for _ in range(3):
             c = model.get_learned_conditioning(prompts)
         samples_ddim, _ = sampler.sample(S=5,

@@ -4,6 +4,9 @@ from imagebind.models import imagebind_model
 from imagebind.models.imagebind_model import ModalityType
 
 
+import sys
+sys.path.append('./src/imagebind')
+
 if __name__ == '__main__':
     text_list = ["A very beautiful canine.", "A car", "A bird", "A fat cartoon rabbit leaving his home", "a fat animal with big ears is gray"]
     image_paths = ["samples/dog_image.jpg", "samples/car_image.jpg", "samples/bird_image.jpg"]
