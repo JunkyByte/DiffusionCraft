@@ -55,13 +55,16 @@ def load_model_from_config(config, ckpt, device=torch.device("cuda"), verbose=Fa
 if __name__ == '__main__':
     seed_everything(42)
 
-    config = OmegaConf.load('src/v2-inference.yaml')
-    device = torch.device('cuda') # if opt.device == 'cuda' else torch.device('cpu')
+    config = OmegaConf.load('src/v2-inference-v.yaml')
+    device_name = 'cuda'
+    device = torch.device(device_name) # if opt.device == 'cuda' else torch.device('cpu')
     model = load_model_from_config(config, '/home/adryw/dataset/imagecraft/sd21-unclip-h.ckpt', device)
 
     # https://nn.labml.ai/diffusion/stable_diffusion/sampler/ddim.html
     # https://stable-diffusion-art.com/samplers/
     sampler = DDIMSampler(model, device=device)
+    # sampler = PLMSSampler(model, device=device)
+    # sampler = DPMSolverSampler(model, device=device)
     ddim_eta = 0  # "ddim eta (eta=0.0 corresponds to deterministic sampling"
 
     # Out folders
@@ -75,9 +78,9 @@ if __name__ == '__main__':
     # wm_encoder.set_watermark('bytes', wm.encode('utf-8'))
 
     # Hardcoded batches and prompts (can be read from file)
-    batch_size = 2
+    batch_size = 1
     n_rows = 1
-    prompt = 'Angela Merkel killing a nazi dinosaur!'
+    prompt = 'character design, dark souls knight, full body, mist, photorealistic, octane render, unreal engine, hyper detailed, volumetric lighting, ultrarealistic, 8k, hdr --ar 9:16 --upbeta --v 5 --s 750'
     data = [batch_size * [prompt]]
 
     sample_path = os.path.join(outpath, "samples")
@@ -92,35 +95,40 @@ if __name__ == '__main__':
     W = 512
     f = 8  # Downsampling factor
     shape = [C, H // f, W // f]
+    diff_steps = 100
 
     # "unconditional guidance scale: eps = eps(x, empty) + scale * (eps(x, cond) - eps(x, empty))"
     scale = 9
 
     start_code = torch.randn([batch_size, *shape], device=device)
-    additional_context = torch.cpu.amp.autocast()
 
     # Warmup
-    prompts = data[0]
-    print("Running a forward pass to initialize optimizations")
     uc = None
-    if scale != 1.0:
-        uc = model.get_learned_conditioning(batch_size * [""])
-    if isinstance(prompts, tuple):
-        prompts = list(prompts)
-
-    with torch.no_grad(), additional_context:
-        for _ in range(3):
+    with torch.no_grad(), model.ema_scope():
+        for prompts in tqdm(data, desc="data"):
+            uc = None
+            if scale != 1.0:
+                uc = model.get_learned_conditioning(batch_size * [""])
+            if isinstance(prompts, tuple):
+                prompts = list(prompts)
             c = model.get_learned_conditioning(prompts)
-        samples_ddim, _ = sampler.sample(S=5,
-                                         conditioning=c,
-                                         batch_size=batch_size,
-                                         shape=shape,
-                                         verbose=False,
-                                         unconditional_guidance_scale=scale,
-                                         unconditional_conditioning=uc,
-                                         eta=ddim_eta,
-                                         x_T=start_code)
-        print("Running a forward pass for decoder")
-        for _ in range(3):
-            x_samples_ddim = model.decode_first_stage(samples_ddim)
+            samples, _ = sampler.sample(S=diff_steps,
+                                        conditioning=c,
+                                        batch_size=batch_size,
+                                        shape=shape,
+                                        verbose=False,
+                                        unconditional_guidance_scale=scale,
+                                        unconditional_conditioning=uc,
+                                        eta=ddim_eta,
+                                        x_T=start_code)
+
+            x_samples = model.decode_first_stage(samples)
+            x_samples = torch.clamp((x_samples + 1.0) / 2.0, min=0.0, max=1.0)
+
+            for x_sample in x_samples:
+                x_sample = 255. * rearrange(x_sample.cpu().numpy(), 'c h w -> h w c')
+                img = Image.fromarray(x_sample.astype(np.uint8))
+                img.save(os.path.join(sample_path, f"{base_count:05}.png"))
+                base_count += 1
+                sample_count += 1
     # =======
