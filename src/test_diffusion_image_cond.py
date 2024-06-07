@@ -1,12 +1,13 @@
 import argparse, os
 import cv2
 import torch
+import PIL
 import numpy as np
 from omegaconf import OmegaConf
 from PIL import Image
 from tqdm import tqdm, trange
 from itertools import islice
-from einops import rearrange
+from einops import rearrange, repeat
 from torchvision.utils import make_grid
 from pytorch_lightning import seed_everything
 from torch import autocast
@@ -19,6 +20,18 @@ from ldm.models.diffusion.plms import PLMSSampler
 from ldm.models.diffusion.dpm_solver import DPMSolverSampler
 
 torch.set_grad_enabled(False)
+
+
+def load_img(path):
+    image = Image.open(path).convert("RGB")
+    w, h = image.size
+    print(f"loaded input image of size ({w}, {h}) from {path}")
+    w, h = map(lambda x: x - x % 64, (w, h))  # resize to integer multiple of 64
+    image = image.resize((w, h), resample=PIL.Image.LANCZOS)
+    image = np.array(image).astype(np.float32) / 255.0
+    image = image[None].transpose(0, 3, 1, 2)
+    image = torch.from_numpy(image)
+    return 2. * image - 1.
 
 
 def chunk(it, size):
@@ -68,7 +81,7 @@ if __name__ == '__main__':
     ddim_eta = 0  # "ddim eta (eta=0.0 corresponds to deterministic sampling"
 
     # Out folders
-    outpath = './output/'
+    outpath = 'output/'
     os.makedirs(outpath, exist_ok=True)
 
     # Watermark?
@@ -80,8 +93,13 @@ if __name__ == '__main__':
     # Hardcoded batches and prompts (can be read from file)
     batch_size = 1
     n_rows = 1
-    prompt = 'dank meme'
+    prompt = 'steampunk car steampunk, futuristic, photorealistic'
     data = [batch_size * [prompt]]
+
+    # Init image
+    init_image = load_img('samples/car_image.jpg')
+    init_image = repeat(init_image, '1 ... -> b ...', b=batch_size).to(device)  # Propag. over batch
+    init_latent = model.get_first_stage_encoding(model.encode_first_stage(init_image))  # move to latent space
 
     sample_path = os.path.join(outpath, "samples")
     os.makedirs(sample_path, exist_ok=True)
@@ -95,12 +113,15 @@ if __name__ == '__main__':
     W = 512
     f = 8  # Downsampling factor
     shape = [C, H // f, W // f]
-    diff_steps = 100
+    diff_steps = 200
+
+    strength = 0.75  # How strong is the init_image transformed during diffusion 1.0 full destruction [0,1]
+    t_enc = int(strength * diff_steps)
 
     # "unconditional guidance scale: eps = eps(x, empty) + scale * (eps(x, cond) - eps(x, empty))"
     scale = 9
 
-    start_code = torch.randn([batch_size, *shape], device=device)
+    sampler.make_schedule(ddim_num_steps=diff_steps, ddim_eta=ddim_eta, verbose=False)
 
     # Warmup
     uc = None
@@ -112,15 +133,10 @@ if __name__ == '__main__':
             if isinstance(prompts, tuple):
                 prompts = list(prompts)
             c = model.get_learned_conditioning(prompts)
-            samples, _ = sampler.sample(S=diff_steps,
-                                        conditioning=c,
-                                        batch_size=batch_size,
-                                        shape=shape,
-                                        verbose=False,
-                                        unconditional_guidance_scale=scale,
-                                        unconditional_conditioning=uc,
-                                        eta=ddim_eta,
-                                        x_T=start_code)
+
+            z_enc = sampler.stochastic_encode(init_latent, torch.tensor([t_enc] * batch_size).to(device))
+            samples = sampler.decode(z_enc, c, t_enc, unconditional_guidance_scale=scale,
+                                     unconditional_conditioning=uc)
 
             x_samples = model.decode_first_stage(samples)
             x_samples = torch.clamp((x_samples + 1.0) / 2.0, min=0.0, max=1.0)
