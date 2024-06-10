@@ -24,6 +24,7 @@ torch.set_grad_enabled(False)
 def load_img_mask(img_file, mask_file, down_factor):
     image = Image.open(img_file).convert('RGB')
     w, h = image.size
+    w, h = map(lambda x: x - x % 64, (w, h))  # resize to integer multiple of 64
     image = image.resize((w, h), resample=Image.Resampling.LANCZOS)
     image = np.array(image).astype(np.float32) / 255.0
     image = image[None].transpose(0, 3, 1, 2)

@@ -80,7 +80,7 @@ if __name__ == '__main__':
     # Hardcoded batches and prompts (can be read from file)
     batch_size = 1
     n_rows = 1
-    prompt = 'dank meme'
+    prompt = 'a beautiful dog'
     data = [batch_size * [prompt]]
 
     sample_path = os.path.join(outpath, "samples")

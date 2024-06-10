@@ -24,6 +24,7 @@ torch.set_grad_enabled(False)
 def load_img_mask(img_file, mask_file, down_factor):
     image = Image.open(img_file).convert('RGB')
     w, h = image.size
+    w, h = map(lambda x: x - x % 64, (w, h))  # resize to integer multiple of 64
     image = image.resize((w, h), resample=Image.Resampling.LANCZOS)
     image = np.array(image).astype(np.float32) / 255.0
     image = image[None].transpose(0, 3, 1, 2)
@@ -98,7 +99,7 @@ if __name__ == '__main__':
 
     # Hardcoded batches and prompts (can be read from file)
     batch_size = 1
-    prompt = 'a monkey on a tree'
+    prompt = 'yellow cat face on a bench at the partk'
 
     sample_path = os.path.join(outpath, "samples")
     os.makedirs(sample_path, exist_ok=True)
@@ -119,7 +120,7 @@ if __name__ == '__main__':
     scale = 9
 
     # Init image and load mask :)
-    init_image, mask = load_img_mask('samples/bird_image.jpg', 'samples/sample_mask.png', f)
+    init_image, mask = load_img_mask('samples/sample_inpaint.png', 'samples/sample_inpaint_mask.png', f)
     print(f'>>> Loaded img and mask with shape {init_image.shape}, {mask.shape}')
 
     # We save masked image
@@ -155,11 +156,14 @@ if __name__ == '__main__':
                 bchw = [batch_size, *shape]
                 cc = torch.nn.functional.interpolate(cc, size=bchw[-2:])
             else:
+                # This might not be relevant anymore, re test
                 # TODO: They will be concat so if wrong dim it won't work!!!
                 # everything but masked_image is reshaped to output dim :O
                 # i will interpolate also image here before applying encoding.
                 # todo check what's the correct way :)
-                cc = torch.nn.functional.interpolate(cc, size=(H, W))
+                # TODO ?
+                # cc = torch.nn.functional.interpolate(cc, size=(H, W))
+
                 cc = model.get_first_stage_encoding(
                             model.encode_first_stage(cc))
 
