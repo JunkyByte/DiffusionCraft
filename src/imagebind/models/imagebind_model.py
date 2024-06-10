@@ -441,7 +441,7 @@ class ImageBindModel(nn.Module):
 
         return nn.ModuleDict(modality_postprocessors)
 
-    def forward(self, inputs):
+    def forward(self, inputs, normalize=True):
         outputs = {}
         for modality_key, modality_value in inputs.items():
             reduce_list = (
@@ -463,9 +463,11 @@ class ImageBindModel(nn.Module):
                 modality_value = self.modality_heads[modality_key](
                     modality_value, **head_inputs
                 )
-                modality_value = self.modality_postprocessors[modality_key](
-                    modality_value
-                )
+
+                if normalize:
+                    modality_value = self.modality_postprocessors[modality_key](
+                        modality_value
+                    )
 
                 if reduce_list:
                     modality_value = modality_value.reshape(B, S, -1)
@@ -505,3 +507,16 @@ def imagebind_huge(ckpt_path=None, pretrained=False):
         model.load_state_dict(torch.load(ckpt_path))
 
     return model
+
+class ImageBindEmbedder(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        # TODO: CURRENTLY HARDCODED
+        self.model = imagebind_huge(ckpt_path='/home/adryw/dataset/imagecraft/imagebind_huge.pth', pretrained=True)
+        self.model.eval()
+        for param in self.parameters():
+            param.requires_grad = False
+
+    def forward(self, *args, **kwargs):
+        return self.model(*args, **kwargs)

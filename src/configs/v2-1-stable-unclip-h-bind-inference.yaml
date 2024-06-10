@@ -24,7 +24,7 @@ model:
         model_type: "dpt_hybrid"
 
     embedder_config:
-      target: image_bind.models.imagebind_model.ImageBindEmbedder
+      target: imagebind.models.imagebind_model.ImageBindEmbedder
 
     noise_aug_config:
       target: ldm.modules.encoders.modules.CLIPEmbeddingNoiseAugmentation
