@@ -31,11 +31,12 @@ def load_img_mask(img_file, mask_file, down_factor):
     image = 2. * image - 1.
     image = image.to(device.type)
 
-    mask = Image.open(mask_file).convert('L')
-    mask = mask.resize((w // down_factor, h // down_factor), resample=Image.Resampling.LANCZOS)
+    mask = Image.open(mask_file)
+    mask = mask.resize((w, h), resample=Image.Resampling.LANCZOS).convert('L')
     mask = np.array(mask).astype(np.float32) / 255.0
-    mask = np.tile(mask, (4, 1, 1))
-    mask = mask[None].transpose(0, 1, 2, 3)
+    mask = mask[None, None]
+    mask[mask < 0.5] = 0
+    mask[mask >= 0.5] = 1
     mask = torch.from_numpy(mask).to(device.type)
     return image, mask
 
@@ -73,10 +74,10 @@ def load_model_from_config(config, ckpt, device=torch.device("cuda"), verbose=Fa
 if __name__ == '__main__':
     seed_everything(42)
 
-    config = OmegaConf.load('src/configs/v2-inference-v.yaml')
+    config = OmegaConf.load('src/configs/v2-inference-v_inpaint.yaml')
     device_name = 'cuda'
     device = torch.device(device_name) # if opt.device == 'cuda' else torch.device('cpu')
-    model = load_model_from_config(config, '/home/adryw/dataset/imagecraft/sd21-unclip-h.ckpt', device)
+    model = load_model_from_config(config, '/home/adryw/dataset/imagecraft/v2_512-inpainting-ema.ckpt', device)
 
     # https://nn.labml.ai/diffusion/stable_diffusion/sampler/ddim.html
     # https://stable-diffusion-art.com/samplers/
@@ -97,8 +98,7 @@ if __name__ == '__main__':
 
     # Hardcoded batches and prompts (can be read from file)
     batch_size = 1
-    prompt = 'face of a yellow cat, high resolution, sitting on a park bench'
-    data = [batch_size * [prompt]]
+    prompt = 'a monkey on a tree'
 
     sample_path = os.path.join(outpath, "samples")
     os.makedirs(sample_path, exist_ok=True)
@@ -112,50 +112,79 @@ if __name__ == '__main__':
     W = 512
     f = 8  # Downsampling factor
     shape = [C, H // f, W // f]
-    diff_steps = 200
-
-    strength = 0.9  # How strong is the init_image transformed during diffusion 1.0 full destruction [0,1]
-    t_enc = int(strength * diff_steps)
+    diff_steps = 100
 
     # "unconditional guidance scale: eps = eps(x, empty) + scale * (eps(x, cond) - eps(x, empty))"
     # it should be higher -> closer to prompt
     scale = 9
 
     # Init image and load mask :)
-    init_image, mask = load_img_mask('samples/sample_inpaint.png', 'samples/sample_inpaint_mask.png', f)
+    init_image, mask = load_img_mask('samples/bird_image.jpg', 'samples/sample_mask.png', f)
     print(f'>>> Loaded img and mask with shape {init_image.shape}, {mask.shape}')
 
+    # We save masked image
+    masked_image = init_image * (mask < 0.5)
+    masked_image = repeat(masked_image.to(device=device), "1 ... -> n ...", n=batch_size)
+    mask = repeat(mask.to(device=device), "1 ... -> n ...", n=batch_size)
+
     init_image = repeat(init_image, '1 ... -> b ...', b=batch_size).to(device)  # Propag. over batch
-    init_latent = model.get_first_stage_encoding(model.encode_first_stage(init_image))  # move to latent space
+
+    start_code = np.random.randn(batch_size, *shape)
+    start_code = torch.from_numpy(start_code).to(
+        device=device, dtype=torch.float32)
 
     sampler.make_schedule(ddim_num_steps=diff_steps, ddim_eta=ddim_eta, verbose=False)
 
-    # Transform z_enc based on mask
-    z_enc = sampler.stochastic_encode(init_latent, torch.tensor([t_enc] * batch_size).to(device))
-    random = torch.randn(mask.shape, device=model.device)
-    z_enc = (mask * random) + ((1 - mask) * z_enc)
+    batch = {
+        "image": init_image,
+        "txt": batch_size * [prompt],
+        "mask": mask,
+        "masked_image": masked_image,
+    }
 
     # Warmup
     uc = None
     with torch.no_grad(), model.ema_scope():
-        for prompts in tqdm(data, desc="data"):
-            uc = None
-            if scale != 1.0:
-                uc = model.get_learned_conditioning(batch_size * [""])
-            if isinstance(prompts, tuple):
-                prompts = list(prompts)
-            c = model.get_learned_conditioning(prompts)
+        c = model.get_learned_conditioning(batch['txt'])
 
-            samples = sampler.decode_inpaint(z_enc, c, t_enc, unconditional_guidance_scale=scale,
-                                             z_mask=mask, x0=init_latent, unconditional_conditioning=uc)
+        # Setup the rest of the conditioning
+        c_cat = list()
+        for ck in model.concat_keys:
+            cc = batch[ck].float()
+            if ck != model.masked_image_key:
+                bchw = [batch_size, *shape]
+                cc = torch.nn.functional.interpolate(cc, size=bchw[-2:])
+            else:
+                # TODO: They will be concat so if wrong dim it won't work!!!
+                # everything but masked_image is reshaped to output dim :O
+                # i will interpolate also image here before applying encoding.
+                # todo check what's the correct way :)
+                cc = torch.nn.functional.interpolate(cc, size=(H, W))
+                cc = model.get_first_stage_encoding(
+                            model.encode_first_stage(cc))
 
-            x_samples = model.decode_first_stage(samples)
-            x_samples = torch.clamp((x_samples + 1.0) / 2.0, min=0.0, max=1.0)
+            c_cat.append(cc)
+        c_cat = torch.cat(c_cat, dim=1)
 
-            for x_sample in x_samples:
-                x_sample = 255. * rearrange(x_sample.cpu().numpy(), 'c h w -> h w c')
-                img = Image.fromarray(x_sample.astype(np.uint8))
-                img.save(os.path.join(sample_path, f"{base_count:05}.png"))
-                base_count += 1
-                sample_count += 1
+        # conditioning!
+        cond = {"c_concat": [c_cat], "c_crossattn": [c]}
+
+        uc_cross = None
+        if scale != 1.0:
+            uc_cross = model.get_learned_conditioning(batch_size * [""])
+        uc_full = {"c_concat": [c_cat], "c_crossattn": [uc_cross]}
+
+        samples = sampler.decode(start_code, cond, diff_steps,
+                                 unconditional_guidance_scale=scale,
+                                 unconditional_conditioning=uc_full)
+                                 
+        x_samples = model.decode_first_stage(samples)
+        x_samples = torch.clamp((x_samples + 1.0) / 2.0, min=0.0, max=1.0)
+
+        for x_sample in x_samples:
+            x_sample = 255. * rearrange(x_sample.cpu().numpy(), 'c h w -> h w c')
+            img = Image.fromarray(x_sample.astype(np.uint8))
+            img.save(os.path.join(sample_path, f"{base_count:05}.png"))
+            base_count += 1
+            sample_count += 1
     # =======
