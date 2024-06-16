@@ -19,6 +19,10 @@ from ldm.models.diffusion.ddim import DDIMSampler
 from ldm.models.diffusion.plms import PLMSSampler
 from ldm.models.diffusion.dpm_solver import DPMSolverSampler
 
+from imagebind import data
+from imagebind.models import imagebind_model
+from imagebind.models.imagebind_model import ModalityType
+
 torch.set_grad_enabled(False)
 
 def load_img_mask(img_file, mask_file, down_factor):
@@ -32,12 +36,11 @@ def load_img_mask(img_file, mask_file, down_factor):
     image = 2. * image - 1.
     image = image.to(device.type)
 
-    mask = Image.open(mask_file)
-    mask = mask.resize((w, h), resample=Image.Resampling.LANCZOS).convert('L')
+    mask = Image.open(mask_file).convert('L')
+    mask = mask.resize((w // down_factor, h // down_factor), resample=Image.Resampling.LANCZOS)
     mask = np.array(mask).astype(np.float32) / 255.0
-    mask = mask[None, None]
-    mask[mask < 0.5] = 0
-    mask[mask >= 0.5] = 1
+    mask = np.tile(mask, (4, 1, 1))
+    mask = mask[None].transpose(0, 1, 2, 3)
     mask = torch.from_numpy(mask).to(device.type)
     return image, mask
 
@@ -75,10 +78,10 @@ def load_model_from_config(config, ckpt, device=torch.device("cuda"), verbose=Fa
 if __name__ == '__main__':
     seed_everything(42)
 
-    config = OmegaConf.load('src/configs/v2-inference-inpaint.yaml')
+    config = OmegaConf.load('src/configs/v2-1-stable-unclip-h-bind-inference.yaml')
     device_name = 'cuda'
     device = torch.device(device_name) # if opt.device == 'cuda' else torch.device('cpu')
-    model = load_model_from_config(config, '/home/adryw/dataset/imagecraft/v2_512-inpainting-ema.ckpt', device)
+    model = load_model_from_config(config, '/home/adryw/dataset/imagecraft/sd21-unclip-h.ckpt', device)
 
     # https://nn.labml.ai/diffusion/stable_diffusion/sampler/ddim.html
     # https://stable-diffusion-art.com/samplers/
@@ -99,7 +102,8 @@ if __name__ == '__main__':
 
     # Hardcoded batches and prompts (can be read from file)
     batch_size = 1
-    prompt = 'a person, sitting'
+    prompt = 'a dog, photo'
+    data_prompts = [batch_size * [prompt]]
 
     sample_path = os.path.join(outpath, "samples")
     os.makedirs(sample_path, exist_ok=True)
@@ -109,86 +113,99 @@ if __name__ == '__main__':
 
     # Can be different
     C = 4  # Latent channels
-    H = 512
-    W = 512
+    H = 768
+    W = 768
     f = 8  # Downsampling factor
     shape = [C, H // f, W // f]
     diff_steps = 100
 
+    # Load img bind stuff
+    image_paths = ["samples/dog_image.jpg"]
+    audio_paths = ["samples/dog_sound.wav"]
+    # depth_paths = "samples/01441.h5"
+
+    # with h5py.File(depth_paths, 'r') as f:
+    #     depth = np.array(f['depth'])
+    #     rgb = np.array(f['rgb'])
+    # depth = ((depth / depth.max()) * 255).astype(np.uint8)
+    # depth = cv2.cvtColor(depth, cv2.COLOR_GRAY2RGB)
+
+    inputs = {
+        ModalityType.VISION: data.load_and_transform_vision_data(image_paths, device),
+        # ModalityType.AUDIO: data.load_and_transform_audio_data(audio_paths, device),
+        # ModalityType.DEPTH: data.load_and_transform_thermal_data([depth], device),
+    }
+
+    # Prepare embeddings cond
+    with torch.no_grad():  # TODO: In main_bind2 they use norm=True for audio
+        embeddings_imagebind = model.embedder(inputs, normalize=False)
+    strength = 0.25
+    noise_level = 0.0
+
+    alpha = 0.5
+    # embeddings_imagebind = 0.1 * embeddings_imagebind[ModalityType.DEPTH]
+    # embeddings_imagebind = alpha * embeddings_imagebind[ModalityType.AUDIO] + (1-alpha) * embeddings_imagebind[ModalityType.VISION]
+    embeddings_imagebind = embeddings_imagebind[ModalityType.VISION]
+
+    c_adm = repeat(embeddings_imagebind, '1 ... -> b ...', b=batch_size) * strength
+    # c_adm = (c_adm / c_adm.norm()) * 20
+
+    if model.noise_augmentor is not None:
+        c_adm, noise_level_emb = model.noise_augmentor(c_adm, noise_level=(
+                torch.ones(batch_size) * model.noise_augmentor.max_noise_level *
+                noise_level).long().to(c_adm.device))
+        # assume this gives embeddings of noise levels
+        c_adm = torch.cat((c_adm, noise_level_emb), 1)
+
+    n_prompt = "text, watermark, blurry, number, poor quality, low quality, cropped"
+
+    strength = 0.9  # How strong is the init_image transformed during diffusion 1.0 full destruction [0,1]
+    t_enc = int(strength * diff_steps)
+
     # "unconditional guidance scale: eps = eps(x, empty) + scale * (eps(x, cond) - eps(x, empty))"
     # it should be higher -> closer to prompt
-    scale = 20
+    scale = 3
 
     # Init image and load mask :)
     init_image, mask = load_img_mask('samples/sample_inpaint.png', 'samples/sample_inpaint_mask.png', f)
     print(f'>>> Loaded img and mask with shape {init_image.shape}, {mask.shape}')
 
-    # We save masked image
-    masked_image = init_image * (mask < 0.5)
-    masked_image = repeat(masked_image.to(device=device), "1 ... -> n ...", n=batch_size)
-    mask = repeat(mask.to(device=device), "1 ... -> n ...", n=batch_size)
-
     init_image = repeat(init_image, '1 ... -> b ...', b=batch_size).to(device)  # Propag. over batch
-
-    start_code = np.random.randn(batch_size, *shape)
-    start_code = torch.from_numpy(start_code).to(
-        device=device, dtype=torch.float32)
+    init_latent = model.get_first_stage_encoding(model.encode_first_stage(init_image))  # move to latent space
 
     sampler.make_schedule(ddim_num_steps=diff_steps, ddim_eta=ddim_eta, verbose=False)
 
-    batch = {
-        "image": init_image,
-        "txt": batch_size * [prompt],
-        "mask": mask,
-        "masked_image": masked_image,
-    }
+    # Transform z_enc based on mask
+    z_enc = sampler.stochastic_encode(init_latent, torch.tensor([t_enc] * batch_size).to(device))
+    random = torch.randn(mask.shape, device=model.device)
+    z_enc = (mask * random) + ((1 - mask) * z_enc)
+
+    # fiuuu
+    model.embedder.to('cpu')
 
     # Warmup
-    uc = None
     with torch.no_grad(), model.ema_scope():
-        c = model.get_learned_conditioning(batch['txt'])
+        for prompts in tqdm(data_prompts, desc="data"):
+            uc_cross = None
+            if scale != 1.0:
+                uc_cross = model.get_learned_conditioning(batch_size * [n_prompt])
+            if isinstance(prompts, tuple):
+                prompts = list(prompts)
+            c = model.get_learned_conditioning(prompts)
 
-        # Setup the rest of the conditioning
-        c_cat = list()
-        for ck in model.concat_keys:
-            cc = batch[ck].float()
-            if ck != model.masked_image_key:
-                bchw = [batch_size, *shape]
-                cc = torch.nn.functional.interpolate(cc, size=bchw[-2:])
-            else:
-                # This might not be relevant anymore, re test
-                # TODO: They will be concat so if wrong dim it won't work!!!
-                # everything but masked_image is reshaped to output dim :O
-                # i will interpolate also image here before applying encoding.
-                # todo check what's the correct way :)
-                # TODO ?
-                # cc = torch.nn.functional.interpolate(cc, size=(H, W))
+            c = {'c_crossattn': [c], 'c_adm': c_adm}
+            uc = {"c_crossattn": [uc_cross], 'c_adm': c_adm}
 
-                cc = model.get_first_stage_encoding(
-                            model.encode_first_stage(cc))
+            samples = sampler.decode_inpaint(z_enc, c, t_enc, unconditional_guidance_scale=scale,
+                                             z_mask=mask, x0=init_latent, unconditional_conditioning=uc)
 
-            c_cat.append(cc)
-        c_cat = torch.cat(c_cat, dim=1)
+            x_samples = model.decode_first_stage(samples)
+            x_samples = torch.clamp((x_samples + 1.0) / 2.0, min=0.0, max=1.0)
 
-        # conditioning!
-        cond = {"c_concat": [c_cat], "c_crossattn": [c]}
-
-        uc_cross = None
-        if scale != 1.0:
-            uc_cross = model.get_learned_conditioning(batch_size * [""])
-        uc_full = {"c_concat": [c_cat], "c_crossattn": [uc_cross]}
-
-        samples = sampler.decode(start_code, cond, diff_steps,
-                                 unconditional_guidance_scale=scale,
-                                 unconditional_conditioning=uc_full)
-                                 
-        x_samples = model.decode_first_stage(samples)
-        x_samples = torch.clamp((x_samples + 1.0) / 2.0, min=0.0, max=1.0)
-
-        for x_sample in x_samples:
-            x_sample = 255. * rearrange(x_sample.cpu().numpy(), 'c h w -> h w c')
-            img = Image.fromarray(x_sample.astype(np.uint8))
-            img.save(os.path.join(sample_path, f"{base_count:05}.png"))
-            base_count += 1
-            sample_count += 1
+            for x_sample in x_samples:
+                x_sample = 255. * rearrange(x_sample.cpu().numpy(), 'c h w -> h w c')
+                img = Image.fromarray(x_sample.astype(np.uint8))
+                img.save(os.path.join(sample_path, f"{base_count:05}.png"))
+                base_count += 1
+                sample_count += 1
     # =======

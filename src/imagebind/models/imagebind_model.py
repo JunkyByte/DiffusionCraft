@@ -514,6 +514,7 @@ class ImageBindEmbedder(nn.Module):
 
         # TODO: CURRENTLY HARDCODED
         self.model = imagebind_huge(ckpt_path='/home/adryw/dataset/imagecraft/imagebind_huge.pth', pretrained=True)
+        # self.model = imagebind_huge(ckpt_path='/u/dssc/adonninelli/scratch/imagebind_huge.pth', pretrained=True)
         self.model.eval()
         for param in self.parameters():
             param.requires_grad = False

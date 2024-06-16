@@ -4,6 +4,7 @@ import torch
 import numpy as np
 from omegaconf import OmegaConf
 from PIL import Image
+import h5py
 from tqdm import tqdm, trange
 from itertools import islice
 from einops import rearrange
@@ -68,6 +69,8 @@ if __name__ == '__main__':
     device_name = 'cuda'
     device = torch.device(device_name) # if opt.device == 'cuda' else torch.device('cpu')
     model = load_model_from_config(config, '/home/adryw/dataset/imagecraft/sd21-unclip-h.ckpt', device)
+    # model = load_model_from_config(config, '/home/adryw/dataset/imagecraft/v2-1_512-ema-pruned.ckpt', device)
+    # model = load_model_from_config(config, '/u/dssc/adonninelli/scratch/sd21-unclip-h.ckpt', device)
 
     # TODO: Add negative prompts
 
@@ -91,13 +94,30 @@ if __name__ == '__main__':
     # Hardcoded batches and prompts (can be read from file)
     batch_size = 1
     n_rows = 1
-    prompt = ''
+    prompt = 'A stunningly intricate (((fantasy-themed poster) )), set in a (((futuristic city) )) of a parallel past where technology collides with nature, featuring a sleek, advanced (((high-tech futuristic vehicle) )) with detailed engineering and a brilliant (airbrushed paint job) incorporating a (rustic) design, colors so vivid they verge on surreal, speeding down a vast, desolate city landscape, its contours and details so highly detailed they defy the realm of reality'
+
+    prompt_addition = ', best quality, extremely detailed'
+    prompt = prompt + prompt_addition
+
     prompts_data = [batch_size * [prompt]]
 
     image_paths = ["samples/car_image.jpg"]
+    audio_paths = ["samples/car_audio.wav"]
+    # depth_paths = "samples/01441.h5"
+
+    # with h5py.File(depth_paths, 'r') as f:
+    #     depth = np.array(f['depth'])
+    #     rgb = np.array(f['rgb'])
+    # depth = ((depth / depth.max()) * 255).astype(np.uint8)
+    # depth = cv2.cvtColor(depth, cv2.COLOR_GRAY2RGB)
+
     inputs = {
         ModalityType.VISION: data.load_and_transform_vision_data(image_paths, device),
+        ModalityType.AUDIO: data.load_and_transform_audio_data(audio_paths, device),
+        # ModalityType.DEPTH: data.load_and_transform_thermal_data([depth], device),
     }
+
+    n_prompt = "text, watermark, blurry, number, poor quality, low quality, cropped"
 
     sample_path = os.path.join(outpath, "samples")
     os.makedirs(sample_path, exist_ok=True)
@@ -107,8 +127,8 @@ if __name__ == '__main__':
 
     # Can be different
     C = 4  # Latent channels
-    H = 512
-    W = 512
+    H = 768
+    W = 768
     f = 8  # Downsampling factor
     shape = [C, H // f, W // f]
     diff_steps = 100
@@ -116,53 +136,63 @@ if __name__ == '__main__':
     # "unconditional guidance scale: eps = eps(x, empty) + scale * (eps(x, cond) - eps(x, empty))"
     scale = 9
 
-    start_code = torch.randn([batch_size, *shape], device=device)
-    
     # Prepare embeddings cond
-    with torch.no_grad():
-        embeddings_imagebind = model.embedder(inputs, normalize=False)[ModalityType.VISION]
-    strength = 1
-    noise_level = 0
-    c_adm = repeat(embeddings_imagebind, '1 ... -> b ...', b=batch_size) * strength
+    with torch.no_grad():  # TODO: In main_bind2 they use norm=True for audio
+        embeddings_imagebind = model.embedder(inputs, normalize=False)
+    strength = 0.75
+    noise_level = 0.1
 
-    if model.noise_augmentor is not None:
-        c_adm, noise_level_emb = model.noise_augmentor(c_adm, noise_level=(
-                torch.ones(batch_size) * model.noise_augmentor.max_noise_level *
-                noise_level).long().to(c_adm.device))
-        # assume this gives embeddings of noise levels
-        c_adm = torch.cat((c_adm, noise_level_emb), 1)
+    alpha = 0.5
+    # embeddings_imagebind = 0.1 * embeddings_imagebind[ModalityType.DEPTH]
+    embeddings_imagebind = alpha * embeddings_imagebind[ModalityType.AUDIO] + (1-alpha) * embeddings_imagebind[ModalityType.VISION]
+    # embeddings_imagebind = embeddings_imagebind[ModalityType.VISION]
 
-    # Warmup
-    uc = None
-    with torch.no_grad(), model.ema_scope():
-        for prompts in tqdm(prompts_data, desc="data"):
-            uc = None
-            if scale != 1.0:
-                uc = model.get_learned_conditioning(batch_size * [""])
-            if isinstance(prompts, tuple):
-                prompts = list(prompts)
-            c = model.get_learned_conditioning(prompts)
+    og_c_adm = repeat(embeddings_imagebind, '1 ... -> b ...', b=batch_size) * strength
+    # c_adm = (c_adm / c_adm.norm()) * 20
+    
+    # fiuuu
+    model.embedder.to('cpu')
 
-            uc = {'c_crossattn': [uc], 'c_adm': c_adm}
-            c = {'c_crossattn': [c], 'c_adm': c_adm}
+    n_samples = 32
+    for _ in range(n_samples):
+        start_code = torch.randn([batch_size, *shape], device=device)
+        
+        c_adm = og_c_adm
+        if model.noise_augmentor is not None:
+            c_adm, noise_level_emb = model.noise_augmentor(og_c_adm, noise_level=(
+                    torch.ones(batch_size) * model.noise_augmentor.max_noise_level *
+                    noise_level).long().to(c_adm.device))
+            # assume this gives embeddings of noise levels
+            c_adm = torch.cat((c_adm, noise_level_emb), 1)
 
-            samples, _ = sampler.sample(S=diff_steps,
-                                        conditioning=c,
-                                        batch_size=batch_size,
-                                        shape=shape,
-                                        verbose=False,
-                                        unconditional_guidance_scale=scale,
-                                        unconditional_conditioning=uc,
-                                        eta=ddim_eta,
-                                        x_T=start_code)
+        with torch.no_grad(), model.ema_scope():
+            for prompts in tqdm(prompts_data, desc="data"):
+                uc = None
+                if scale != 1.0:
+                    uc = model.get_learned_conditioning(batch_size * [n_prompt])
+                if isinstance(prompts, tuple):
+                    prompts = list(prompts)
+                c = model.get_learned_conditioning(prompts)
 
-            x_samples = model.decode_first_stage(samples)
-            x_samples = torch.clamp((x_samples + 1.0) / 2.0, min=0.0, max=1.0)
+                uc = {'c_crossattn': [uc], 'c_adm': c_adm}
+                c = {'c_crossattn': [c], 'c_adm': c_adm}
 
-            for x_sample in x_samples:
-                x_sample = 255. * rearrange(x_sample.cpu().numpy(), 'c h w -> h w c')
-                img = Image.fromarray(x_sample.astype(np.uint8))
-                img.save(os.path.join(sample_path, f"{base_count:05}.png"))
-                base_count += 1
-                sample_count += 1
-    # =======
+                samples, _ = sampler.sample(S=diff_steps,
+                                            conditioning=c,
+                                            batch_size=batch_size,
+                                            shape=shape,
+                                            verbose=False,
+                                            unconditional_guidance_scale=scale,
+                                            unconditional_conditioning=uc,
+                                            eta=ddim_eta,
+                                            x_T=start_code)
+
+                x_samples = model.decode_first_stage(samples)
+                x_samples = torch.clamp((x_samples + 1.0) / 2.0, min=0.0, max=1.0)
+
+                for x_sample in x_samples:
+                    x_sample = 255. * rearrange(x_sample.cpu().numpy(), 'c h w -> h w c')
+                    img = Image.fromarray(x_sample.astype(np.uint8))
+                    img.save(os.path.join(sample_path, f"{base_count:05}.png"))
+                    base_count += 1
+                    sample_count += 1

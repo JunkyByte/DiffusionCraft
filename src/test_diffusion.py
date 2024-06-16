@@ -55,16 +55,17 @@ def load_model_from_config(config, ckpt, device=torch.device("cuda"), verbose=Fa
 if __name__ == '__main__':
     seed_everything(42)
 
-    config = OmegaConf.load('src/configs/v2-inference-v.yaml')
+    config = OmegaConf.load('src/configs/v2-inference.yaml')
     device_name = 'cuda'
     device = torch.device(device_name) # if opt.device == 'cuda' else torch.device('cpu')
-    model = load_model_from_config(config, '/home/adryw/dataset/imagecraft/sd21-unclip-h.ckpt', device)
+    # model = load_model_from_config(config, '/home/adryw/dataset/imagecraft/sd21-unclip-h.ckpt', device)
+    model = load_model_from_config(config, '/home/adryw/dataset/imagecraft/v2-1_512-ema-pruned.ckpt', device)
 
     # https://nn.labml.ai/diffusion/stable_diffusion/sampler/ddim.html
     # https://stable-diffusion-art.com/samplers/
-    sampler = DDIMSampler(model, device=device)
+    # sampler = DDIMSampler(model, device=device)
     # sampler = PLMSSampler(model, device=device)
-    # sampler = DPMSolverSampler(model, device=device)
+    sampler = DPMSolverSampler(model, device=device)
     ddim_eta = 0  # "ddim eta (eta=0.0 corresponds to deterministic sampling"
 
     # Out folders
@@ -80,7 +81,7 @@ if __name__ == '__main__':
     # Hardcoded batches and prompts (can be read from file)
     batch_size = 1
     n_rows = 1
-    prompt = 'a beautiful dog'
+    prompt = 'a skyscraper, photorealistic'
     data = [batch_size * [prompt]]
 
     sample_path = os.path.join(outpath, "samples")

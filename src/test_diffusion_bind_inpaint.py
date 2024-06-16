@@ -19,6 +19,10 @@ from ldm.models.diffusion.ddim import DDIMSampler
 from ldm.models.diffusion.plms import PLMSSampler
 from ldm.models.diffusion.dpm_solver import DPMSolverSampler
 
+from imagebind import data
+from imagebind.models import imagebind_model
+from imagebind.models.imagebind_model import ModalityType
+
 torch.set_grad_enabled(False)
 
 def load_img_mask(img_file, mask_file, down_factor):
@@ -75,7 +79,7 @@ def load_model_from_config(config, ckpt, device=torch.device("cuda"), verbose=Fa
 if __name__ == '__main__':
     seed_everything(42)
 
-    config = OmegaConf.load('src/configs/v2-inference-inpaint.yaml')
+    config = OmegaConf.load('src/configs/v2-1-stable-unclip-h-bind_inpaint.yaml')
     device_name = 'cuda'
     device = torch.device(device_name) # if opt.device == 'cuda' else torch.device('cpu')
     model = load_model_from_config(config, '/home/adryw/dataset/imagecraft/v2_512-inpainting-ema.ckpt', device)
@@ -99,7 +103,7 @@ if __name__ == '__main__':
 
     # Hardcoded batches and prompts (can be read from file)
     batch_size = 1
-    prompt = 'a person, sitting'
+    prompt = ''
 
     sample_path = os.path.join(outpath, "samples")
     os.makedirs(sample_path, exist_ok=True)
@@ -114,6 +118,46 @@ if __name__ == '__main__':
     f = 8  # Downsampling factor
     shape = [C, H // f, W // f]
     diff_steps = 100
+
+    # Load img bind stuff
+    image_paths = ["samples/dog_image.jpg"]
+    audio_paths = ["samples/rain.wav"]
+    # depth_paths = "samples/01441.h5"
+
+    # with h5py.File(depth_paths, 'r') as f:
+    #     depth = np.array(f['depth'])
+    #     rgb = np.array(f['rgb'])
+    # depth = ((depth / depth.max()) * 255).astype(np.uint8)
+    # depth = cv2.cvtColor(depth, cv2.COLOR_GRAY2RGB)
+
+    inputs = {
+        ModalityType.VISION: data.load_and_transform_vision_data(image_paths, device),
+        # ModalityType.AUDIO: data.load_and_transform_audio_data(audio_paths, device),
+        # ModalityType.DEPTH: data.load_and_transform_thermal_data([depth], device),
+    }
+
+    # Prepare embeddings cond
+    with torch.no_grad():  # TODO: In main_bind2 they use norm=True for audio
+        embeddings_imagebind = model.embedder(inputs, normalize=False)
+    strength = 0.75
+    noise_level = 0.3
+
+    alpha = 0.5
+    # embeddings_imagebind = 0.1 * embeddings_imagebind[ModalityType.DEPTH]
+    # embeddings_imagebind = alpha * embeddings_imagebind[ModalityType.AUDIO] + (1-alpha) * embeddings_imagebind[ModalityType.VISION]
+    embeddings_imagebind = embeddings_imagebind[ModalityType.VISION]
+
+    c_adm = repeat(embeddings_imagebind, '1 ... -> b ...', b=batch_size) * strength
+    # c_adm = (c_adm / c_adm.norm()) * 20
+
+    if model.noise_augmentor is not None:
+        c_adm, noise_level_emb = model.noise_augmentor(c_adm, noise_level=(
+                torch.ones(batch_size) * model.noise_augmentor.max_noise_level *
+                noise_level).long().to(c_adm.device))
+        # assume this gives embeddings of noise levels
+        c_adm = torch.cat((c_adm, noise_level_emb), 1)
+
+    n_prompt = "text, watermark, blurry, number, poor quality, low quality, cropped"
 
     # "unconditional guidance scale: eps = eps(x, empty) + scale * (eps(x, cond) - eps(x, empty))"
     # it should be higher -> closer to prompt
@@ -151,6 +195,7 @@ if __name__ == '__main__':
         # Setup the rest of the conditioning
         c_cat = list()
         for ck in model.concat_keys:
+            print(ck)
             cc = batch[ck].float()
             if ck != model.masked_image_key:
                 bchw = [batch_size, *shape]
@@ -171,12 +216,12 @@ if __name__ == '__main__':
         c_cat = torch.cat(c_cat, dim=1)
 
         # conditioning!
-        cond = {"c_concat": [c_cat], "c_crossattn": [c]}
+        cond = {"c_concat": [c_cat], "c_crossattn": [c], 'c_adm': c_adm}
 
         uc_cross = None
         if scale != 1.0:
-            uc_cross = model.get_learned_conditioning(batch_size * [""])
-        uc_full = {"c_concat": [c_cat], "c_crossattn": [uc_cross]}
+            uc_cross = model.get_learned_conditioning(batch_size * [n_prompt])
+        uc_full = {"c_concat": [c_cat], "c_crossattn": [uc_cross], 'c_adm': c_adm}
 
         samples = sampler.decode(start_code, cond, diff_steps,
                                  unconditional_guidance_scale=scale,
