@@ -508,13 +508,19 @@ def imagebind_huge(ckpt_path=None, pretrained=False):
 
     return model
 
+
+import yaml
+with open('src/configs/configs.yaml', 'r') as file:
+    config_data = yaml.safe_load(file)
+
 class ImageBindEmbedder(nn.Module):
     def __init__(self):
         super().__init__()
 
         # TODO: CURRENTLY HARDCODED
-        self.model = imagebind_huge(ckpt_path='/home/adryw/dataset/imagecraft/imagebind_huge.pth', pretrained=True)
+        self.model = imagebind_huge(ckpt_path=config_data['imagebind_ckpt'], pretrained=True)
         # self.model = imagebind_huge(ckpt_path='/u/dssc/adonninelli/scratch/imagebind_huge.pth', pretrained=True)
+
         self.model.eval()
         for param in self.parameters():
             param.requires_grad = False

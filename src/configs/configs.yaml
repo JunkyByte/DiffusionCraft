@@ -1,0 +1,2 @@
+imagebind_ckpt: '/home/adryw/dataset/imagecraft/imagebind_huge.pth'
+sd_ckpt: '/home/adryw/dataset/imagecraft/sd21-unclip-h.ckpt'
