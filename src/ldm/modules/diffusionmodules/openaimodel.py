@@ -793,14 +793,22 @@ class UNetModel(nn.Module):
             emb = emb + self.label_emb(y)
 
         h = x.type(self.dtype)
+        # print('Initial in:', h.shape, emb.shape)
         for module in self.input_blocks:
             h = module(h, emb, context)
+            # print('Input blocks:', h.shape, emb.shape)
             hs.append(h)
+        # print('Middle in', h.shape, emb.shape)
         h = self.middle_block(h, emb, context)
+        # print('Middle out', h.shape, emb.shape)
         for module in self.output_blocks:
             h = th.cat([h, hs.pop()], dim=1)
+            # print('H in outblock', h.shape, emb.shape)
             h = module(h, emb, context)
+            # print('Outblock out', h.shape, emb.shape)
         h = h.type(x.dtype)
+        # print('Final', h.shape)
+        # print('Out shape', self.out(h).shape)
         if self.predict_codebook_ids:
             return self.id_predictor(h)
         else:

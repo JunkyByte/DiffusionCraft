@@ -64,7 +64,6 @@ def load_model_from_config(config, ckpt, device=torch.device("cuda"), verbose=Fa
 
 if __name__ == '__main__':
     seed_everything(42)
-
     config = OmegaConf.load('src/configs/v2-1-stable-unclip-h-bind-inference.yaml')
     device_name = 'cuda'
     device = torch.device(device_name) # if opt.device == 'cuda' else torch.device('cpu')
@@ -77,24 +76,16 @@ if __name__ == '__main__':
     # https://nn.labml.ai/diffusion/stable_diffusion/sampler/ddim.html
     # https://stable-diffusion-art.com/samplers/
     sampler = DDIMSampler(model, device=device)
-    # sampler = PLMSSampler(model, device=device)
-    # sampler = DPMSolverSampler(model, device=device)
     ddim_eta = 0  # "ddim eta (eta=0.0 corresponds to deterministic sampling"
 
     # Out folders
     outpath = './output/'
     os.makedirs(outpath, exist_ok=True)
 
-    # Watermark?
-    # print("Creating invisible watermark encoder (see https://github.com/ShieldMnt/invisible-watermark)...")
-    # wm = "SDV2"
-    # wm_encoder = WatermarkEncoder()
-    # wm_encoder.set_watermark('bytes', wm.encode('utf-8'))
-
     # Hardcoded batches and prompts (can be read from file)
     batch_size = 1
     n_rows = 1
-    prompt = 'A stunningly intricate (((fantasy-themed poster) )), set in a (((futuristic city) )) of a parallel past where technology collides with nature, featuring a sleek, advanced (((high-tech futuristic vehicle) )) with detailed engineering and a brilliant (airbrushed paint job) incorporating a (rustic) design, colors so vivid they verge on surreal, speeding down a vast, desolate city landscape, its contours and details so highly detailed they defy the realm of reality'
+    prompt = 'a photo of sunset with highway in the distance, canyon style, vivid colors, western, sunset, chill mood, detailed, orange'
 
     prompt_addition = ', best quality, extremely detailed'
     prompt = prompt + prompt_addition
@@ -102,7 +93,7 @@ if __name__ == '__main__':
     prompts_data = [batch_size * [prompt]]
 
     image_paths = ["samples/car_image.jpg"]
-    audio_paths = ["samples/car_audio.wav"]
+    audio_paths = ["samples/rain.wav"]
     # depth_paths = "samples/01441.h5"
 
     # with h5py.File(depth_paths, 'r') as f:
@@ -117,7 +108,7 @@ if __name__ == '__main__':
         # ModalityType.DEPTH: data.load_and_transform_thermal_data([depth], device),
     }
 
-    n_prompt = "text, watermark, blurry, number, poor quality, low quality, cropped"
+    n_prompt = 'longbody, lowres, bad anatomy, bad hands, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality'
 
     sample_path = os.path.join(outpath, "samples")
     os.makedirs(sample_path, exist_ok=True)
@@ -131,7 +122,7 @@ if __name__ == '__main__':
     W = 768
     f = 8  # Downsampling factor
     shape = [C, H // f, W // f]
-    diff_steps = 100
+    diff_steps = 50
 
     # "unconditional guidance scale: eps = eps(x, empty) + scale * (eps(x, cond) - eps(x, empty))"
     scale = 9
@@ -139,22 +130,22 @@ if __name__ == '__main__':
     # Prepare embeddings cond
     with torch.no_grad():  # TODO: In main_bind2 they use norm=True for audio
         embeddings_imagebind = model.embedder(inputs, normalize=False)
-    strength = 0.75
-    noise_level = 0.1
+    strength = 0.5
+    noise_level = 0.25
 
     alpha = 0.5
     # embeddings_imagebind = 0.1 * embeddings_imagebind[ModalityType.DEPTH]
-    embeddings_imagebind = alpha * embeddings_imagebind[ModalityType.AUDIO] + (1-alpha) * embeddings_imagebind[ModalityType.VISION]
-    # embeddings_imagebind = embeddings_imagebind[ModalityType.VISION]
+    # embeddings_imagebind = alpha * embeddings_imagebind[ModalityType.AUDIO] + (1-alpha) * embeddings_imagebind[ModalityType.VISION]
+    embeddings_imagebind = embeddings_imagebind[ModalityType.VISION]
 
     og_c_adm = repeat(embeddings_imagebind, '1 ... -> b ...', b=batch_size) * strength
-    # c_adm = (c_adm / c_adm.norm()) * 20
+    # og_c_adm = (og_c_adm / og_c_adm.norm()) * 20
     
     # fiuuu
     model.embedder.to('cpu')
 
     n_samples = 32
-    for _ in range(n_samples):
+    for i in range(n_samples):
         start_code = torch.randn([batch_size, *shape], device=device)
         
         c_adm = og_c_adm

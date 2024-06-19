@@ -55,17 +55,18 @@ def load_model_from_config(config, ckpt, device=torch.device("cuda"), verbose=Fa
 if __name__ == '__main__':
     seed_everything(42)
 
-    config = OmegaConf.load('src/configs/v2-inference.yaml')
+    config = OmegaConf.load('src/configs/v2-inference-v.yaml')
     device_name = 'cuda'
     device = torch.device(device_name) # if opt.device == 'cuda' else torch.device('cpu')
     # model = load_model_from_config(config, '/home/adryw/dataset/imagecraft/sd21-unclip-h.ckpt', device)
-    model = load_model_from_config(config, '/home/adryw/dataset/imagecraft/v2-1_512-ema-pruned.ckpt', device)
+    # model = load_model_from_config(config, '/home/adryw/dataset/imagecraft/v2-1_512-ema-pruned.ckpt', device)
+    model = load_model_from_config(config, '/u/dssc/adonninelli/scratch/sd21-unclip-h.ckpt', device)
 
     # https://nn.labml.ai/diffusion/stable_diffusion/sampler/ddim.html
     # https://stable-diffusion-art.com/samplers/
-    # sampler = DDIMSampler(model, device=device)
+    sampler = DDIMSampler(model, device=device)
     # sampler = PLMSSampler(model, device=device)
-    sampler = DPMSolverSampler(model, device=device)
+    # sampler = DPMSolverSampler(model, device=device)
     ddim_eta = 0  # "ddim eta (eta=0.0 corresponds to deterministic sampling"
 
     # Out folders
@@ -81,7 +82,8 @@ if __name__ == '__main__':
     # Hardcoded batches and prompts (can be read from file)
     batch_size = 1
     n_rows = 1
-    prompt = 'a skyscraper, photorealistic'
+    prompt = 'A cat battle mage, sword and shild with runes, dramatic lighting, dynamic pose, dynamic camera, masterpiece, best quality, dark shadows, ((dark fantasy) ), detailed, realistic, 8k uhd, high quality'
+    n_prompt = '(worst quality:2) , (low quality:2) , (mutated hands and fingers) , (poorly drawn hands) , (mutation)'
     data = [batch_size * [prompt]]
 
     sample_path = os.path.join(outpath, "samples")
@@ -92,45 +94,47 @@ if __name__ == '__main__':
 
     # Can be different
     C = 4  # Latent channels
-    H = 512
-    W = 512
+    H = 768
+    W = 768
     f = 8  # Downsampling factor
     shape = [C, H // f, W // f]
-    diff_steps = 100
+    diff_steps = 40
 
     # "unconditional guidance scale: eps = eps(x, empty) + scale * (eps(x, cond) - eps(x, empty))"
-    scale = 9
+    scale = 7
 
-    start_code = torch.randn([batch_size, *shape], device=device)
+    for i in range(30):
+        seed_everything(i * 123456789)
+        start_code = torch.randn([batch_size, *shape], device=device)
 
-    # Warmup
-    uc = None
-    with torch.no_grad(), model.ema_scope():
-        for prompts in tqdm(data, desc="data"):
-            uc = None
-            if scale != 1.0:
-                uc = model.get_learned_conditioning(batch_size * [""])
-            if isinstance(prompts, tuple):
-                prompts = list(prompts)
-            c = model.get_learned_conditioning(prompts)
+        # Warmup
+        uc = None
+        with torch.no_grad(), model.ema_scope():
+            for prompts in tqdm(data, desc="data"):
+                uc = None
+                if scale != 1.0:
+                    uc = model.get_learned_conditioning(batch_size * [n_prompt])
+                if isinstance(prompts, tuple):
+                    prompts = list(prompts)
+                c = model.get_learned_conditioning(prompts)
 
-            samples, _ = sampler.sample(S=diff_steps,
-                                        conditioning=c,
-                                        batch_size=batch_size,
-                                        shape=shape,
-                                        verbose=False,
-                                        unconditional_guidance_scale=scale,
-                                        unconditional_conditioning=uc,
-                                        eta=ddim_eta,
-                                        x_T=start_code)
+                samples, _ = sampler.sample(S=diff_steps,
+                                            conditioning=c,
+                                            batch_size=batch_size,
+                                            shape=shape,
+                                            verbose=False,
+                                            unconditional_guidance_scale=scale,
+                                            unconditional_conditioning=uc,
+                                            eta=ddim_eta,
+                                            x_T=start_code)
 
-            x_samples = model.decode_first_stage(samples)
-            x_samples = torch.clamp((x_samples + 1.0) / 2.0, min=0.0, max=1.0)
+                x_samples = model.decode_first_stage(samples)
+                x_samples = torch.clamp((x_samples + 1.0) / 2.0, min=0.0, max=1.0)
 
-            for x_sample in x_samples:
-                x_sample = 255. * rearrange(x_sample.cpu().numpy(), 'c h w -> h w c')
-                img = Image.fromarray(x_sample.astype(np.uint8))
-                img.save(os.path.join(sample_path, f"{base_count:05}.png"))
-                base_count += 1
-                sample_count += 1
-    # =======
+                for x_sample in x_samples:
+                    x_sample = 255. * rearrange(x_sample.cpu().numpy(), 'c h w -> h w c')
+                    img = Image.fromarray(x_sample.astype(np.uint8))
+                    img.save(os.path.join(sample_path, f"{base_count:05}.png"))
+                    base_count += 1
+                    sample_count += 1
+        # =======
