@@ -1,4 +1,5 @@
 import argparse, os
+import yaml
 import cv2
 import torch
 import numpy as np
@@ -203,36 +204,48 @@ def load_model_from_config(config, ckpt, device=torch.device("cuda"), verbose=Fa
 if __name__ == '__main__':
     opt = parse_args()
 
-    import yaml
+    print("Loading configuration files...")
     with open('src/configs/configs.yaml', 'r') as file:
         config_data = yaml.safe_load(file)
 
     config = OmegaConf.load('src/configs/v2-1-stable-unclip-h-bind-inference.yaml')
     device_name = 'cuda'
     device = torch.device(device_name) # if opt.device == 'cuda' else torch.device('cpu')
+    print(f"Using device: {device}")
+
     model = load_model_from_config(config, config_data['sd_ckpt'], device)
+    print("Model loaded successfully.")
 
     # https://nn.labml.ai/diffusion/stable_diffusion/sampler/ddim.html
     # https://stable-diffusion-art.com/samplers/
     if opt.dpm:
         sampler = DPMSolverSampler(model, device=device)
+        print("Using DPM Solver Sampler.")
     else:
         sampler = DDIMSampler(model, device=device)
+        print("Using DDIM Sampler.")
 
     # Out folders
     os.makedirs(opt.outdir, exist_ok=True)
+    print(f"Output directory created: {opt.outdir}")
 
     # Hardcoded batches and prompts (can be read from file)
     batch_size = 1
     prompt = opt.prompt
     prompt_addition = ', best quality, extremely detailed'
     prompt = prompt + prompt_addition
+    print(f"Using prompt: {prompt}")
     prompts_data = [batch_size * [prompt]]
 
     n_prompt = '2D | | Low Quality | | text logos | | watermarks | | signatures | | out of frame | | jpeg artifacts | | ugly | | poorly drawn | | extra limbs | | extra hands | | extra feet | | backwards limbs | | extra fingers | | extra toes | | unrealistic, incorrect, bad anatomy | | cut off body pieces | | strange body positions | | impossible body positioning | | Mismatched eyes | | cross eyed | | crooked face | | crooked lips | | unclear | | undefined | | mutations | | deformities | | off center | | poor_composition | | duplicate faces, plastic, fake, human, humans, people, tiny, negativity, blurry, blurred, doll, unclear'
 
     image_paths = opt.cond_image if opt.cond_image else []
     audio_paths = opt.cond_audio if opt.cond_audio else []
+
+    if image_paths:
+        print(f"Conditioning on images: {image_paths}")
+    if audio_paths:
+        print(f"Conditioning on audio: {audio_paths}")
 
     # TODO: DEPTHS
     # depth_paths = "samples/01441.h5"
@@ -258,12 +271,16 @@ if __name__ == '__main__':
     shape = [C, H // f, W // f]
     diff_steps = opt.steps
 
+    print(f"Using shape: {shape}, diffusion steps: {diff_steps}")
+
     # "unconditional guidance scale: eps = eps(x, empty) + scale * (eps(x, cond) - eps(x, empty))"
     scale = opt.scale
+    print(f"Using guidance scale: {scale}")
 
     # Prepare embeddings cond
     num_conds = len(image_paths) + len(audio_paths)
     noise_level = opt.noise_level
+    print(f"Number of conditions: {num_conds}, noise level: {noise_level}")
 
     if num_conds:
         inputs = {}
@@ -276,11 +293,13 @@ if __name__ == '__main__':
         with torch.no_grad():  # TODO: In main_bind2 they use norm=True for audio
             embeddings_imagebind = model.embedder(inputs, normalize=False)
         cond_strength = opt.cond_strength
+        print(f"Conditioning strength: {cond_strength}")
 
         if num_conds == 2:
             alpha = opt.alpha
             if len(image_paths) and len(audio_paths):
                 embeddings_imagebind = alpha * embeddings_imagebind[ModalityType.VISION] + (1 - alpha) * embeddings_imagebind[ModalityType.AUDIO]
+                print(f"Using alpha blending: alpha={alpha}")
             else:
                 key = list(inputs.keys())[0]
                 embeddings_imagebind = (alpha * embeddings_imagebind[key][0] + (1 - alpha) * embeddings_imagebind[key][1]).unsqueeze(0)
@@ -296,7 +315,7 @@ if __name__ == '__main__':
         # og_c_adm = (og_c_adm / og_c_adm.norm()) * 20
     else:
         og_c_adm = torch.zeros((1, 1024), device=device)
-
+        print("No conditioning used.")
 
     if opt.start_image is not None:
         init_image_file = load_img(opt.start_image)
