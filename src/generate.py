@@ -229,7 +229,7 @@ if __name__ == '__main__':
     prompt = prompt + prompt_addition
     prompts_data = [batch_size * [prompt]]
 
-    n_prompt = 'longbody, lowres, bad anatomy, bad hands, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, text, crop, cut, amatorial'
+    n_prompt = '2D | | Low Quality | | text logos | | watermarks | | signatures | | out of frame | | jpeg artifacts | | ugly | | poorly drawn | | extra limbs | | extra hands | | extra feet | | backwards limbs | | extra fingers | | extra toes | | unrealistic, incorrect, bad anatomy | | cut off body pieces | | strange body positions | | impossible body positioning | | Mismatched eyes | | cross eyed | | crooked face | | crooked lips | | unclear | | undefined | | mutations | | deformities | | off center | | poor_composition | | duplicate faces, plastic, fake, human, humans, people, tiny, negativity, blurry, blurred, doll, unclear'
 
     image_paths = opt.cond_image if opt.cond_image else []
     audio_paths = opt.cond_audio if opt.cond_audio else []
