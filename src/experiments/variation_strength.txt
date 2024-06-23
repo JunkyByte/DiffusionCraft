@@ -1,5 +1,5 @@
 "A painting" bird_image.jpg cubism.jpeg
-"A photo of a cyborg bear in a scifi landscape" bearsquare.webp
+"A photo of a cyborg bear in a forest, scifi, future, angry, technology" bearsquare.webp
 "robocop angry robot" ronnie.jpeg
 "A photo" santasquare.png optimus.jpeg
 "A majestic statue, with arms, during the fall of the roman empire" veneresquare.png fire.jpeg firewood-burning-sound-179862.mp3

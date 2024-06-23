@@ -42,11 +42,11 @@ def create_grids(base_dir, output_dir):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    for index in range(1, 11):
+    for index in range(11):
         files = [[] for _ in range(8)]
         for reps in range(0, 8):
-            for scale_dir in sorted(glob.glob(os.path.join(base_dir, 'scale_*')), key=lambda x: int(x[x.rfind('_') + 1:])):
-                f = glob.glob(os.path.join(scale_dir, f'index_{index}', 'samples/', f'*_{reps}.png'))
+            for strength_dir in sorted(glob.glob(os.path.join(base_dir, 'variation_strength_*')), key=lambda x: float(x[x.rfind('_') + 1:])):
+                f = glob.glob(os.path.join(strength_dir, f'index_{index}', 'samples/', f'*_{reps}.png'))
                 files[reps].append(f[0])
         
                 out = os.path.join(output_dir, f'seed_{index}')
@@ -57,6 +57,6 @@ def create_grids(base_dir, output_dir):
             create_image_grid(files[reps], grid_image_output)
 
 if __name__ == "__main__":
-    base_dir = 'output/experiment_scale/'
-    output_dir = 'output/experiment_scale/results/'
+    base_dir = 'output/variation_strength/'
+    output_dir = 'output/variation_strength/results/'
     create_grids(base_dir, output_dir)

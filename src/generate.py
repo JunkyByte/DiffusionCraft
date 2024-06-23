@@ -51,11 +51,20 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--mask",
+        type=str,
+        default=None,
+        nargs="?",
+        help=""
+    )
+
+    parser.add_argument(
         "--cond-image",
         type=str,
         nargs="*",
         help=""
     )
+
     parser.add_argument(
         "--cond-audio",
         type=str,
@@ -173,6 +182,17 @@ def load_img(img_file):
     image = 2. * image - 1.
     image = image.to(device.type)
     return image
+
+
+def load_mask(mask_file, img_w, img_h, down_factor):
+    w, h = img_w, img_h
+    mask = Image.open(mask_file).convert('L')
+    mask = mask.resize((w // down_factor, h // down_factor), resample=Image.Resampling.LANCZOS)
+    mask = np.array(mask).astype(np.float32) / 255.0
+    mask = np.tile(mask, (4, 1, 1))
+    mask = mask[None].transpose(0, 1, 2, 3)
+    mask = torch.from_numpy(mask).to(device.type)
+    return mask
 
 
 def load_model_from_config(config, ckpt, device=torch.device("cuda"), verbose=False):
@@ -316,10 +336,17 @@ if __name__ == '__main__':
     else:
         og_c_adm = torch.zeros((1, 1024), device=device)
         print("No conditioning used.")
+    
+    if opt.start_image is None and opt.mask is not None:
+        raise RuntimeError("If mask is passed also start image must be passed")
 
     if opt.start_image is not None:
         init_image_file = load_img(opt.start_image)
         print(f'>>> Loaded img with shape {init_image_file.shape}')
+
+    if opt.mask is not None:
+        mask = load_mask(opt.mask, init_image_file.shape[3], init_image_file.shape[2], f)
+        print(f'>>> Loaded mask, reshaped to {init_image_file.shape}')
 
     # fiuuu
     model.embedder.to('cpu')
@@ -335,6 +362,9 @@ if __name__ == '__main__':
             sampler.make_schedule(ddim_num_steps=diff_steps, ddim_eta=opt.ddim_eta, verbose=False)
             t_enc = int(opt.img_strength * diff_steps)
             z_enc = sampler.stochastic_encode(init_latent, torch.tensor([t_enc] * batch_size).to(device))
+            if opt.mask is not None:
+                random = torch.randn(mask.shape, device=model.device)
+                z_enc = (mask * random) + ((1 - mask) * z_enc)
         
         c_adm = og_c_adm
         if model.noise_augmentor is not None:
@@ -350,10 +380,7 @@ if __name__ == '__main__':
                     uc = model.get_learned_conditioning(batch_size * [n_prompt])
                 c = model.get_learned_conditioning(prompts)
 
-                # Hello?
-                # uc = {'c_crossattn': [uc], 'c_adm': c_adm}
                 uc = {"c_crossattn": [uc], "c_adm": torch.zeros_like(c_adm)}
-
                 c = {'c_crossattn': [c], 'c_adm': c_adm}
 
                 if opt.start_image is None:
@@ -367,8 +394,12 @@ if __name__ == '__main__':
                                                 eta=opt.ddim_eta,
                                                 x_T=start_code)
                 else:
-                    samples = sampler.decode(z_enc, c, t_enc, unconditional_guidance_scale=scale,
-                                             unconditional_conditioning=uc)
+                    if opt.mask is None:
+                        samples = sampler.decode(z_enc, c, t_enc, unconditional_guidance_scale=scale,
+                                                unconditional_conditioning=uc)
+                    else:
+                        samples = sampler.decode_inpaint(z_enc, c, t_enc, unconditional_guidance_scale=scale,
+                                                         z_mask=mask, x0=init_latent, unconditional_conditioning=uc)
 
                 x_samples = model.decode_first_stage(samples)
                 x_samples = torch.clamp((x_samples + 1.0) / 2.0, min=0.0, max=1.0)

@@ -11,18 +11,19 @@ def run_experiment(prompt, prompt_idx, cond_images, cond_audio, start_img, varia
         "--prompt", prompt,
         "--n-iter", "8",
         "--cond-strength", "0.5",
-        "--img-strength", variation_strength,
+        "--img-strength", str(variation_strength),
         "--alpha", "0.5",
-        "--start-img", start_img,
+        "--start-image", start_img,
     ]
 
     if len(cond_images):
-        command.extend(["--cond-image", " ".join(cond_images)])
+        command.append('--cond-image')
+        command.extend(cond_images)
     if len(cond_audio):
-        command.extend(["--cond-audio", " ".join(cond_audio)])
+        command.append('--cond-audio')
+        command.extend(cond_audio)
 
-    print(command)
-    # subprocess.run(command)
+    subprocess.run(command)
 
 # Read the input file
 input_file = 'src/experiments/variation_strength.txt'  # change this to the path of your input file
@@ -48,6 +49,7 @@ for ith, line in enumerate(lines):
 
     cond_images = [os.path.join('samples/imgs', f) for f in cond_images]
     cond_audio = [os.path.join('samples/audio', f) for f in cond_audio]
+    init_img = os.path.join('samples/imgs/', cond[0])
 
     # Run the experiments for different cond_strength values
     for img_destruction_strength in [(i + 1) / 10 for i in range(9)]:
