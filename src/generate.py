@@ -328,6 +328,31 @@ if __name__ == '__main__':
         og_c_adm = torch.zeros((1, 1024), device=device)
         print("No conditioning used.")
 
+    # REMOVE ME hard coded depth loading (overwrites other conditioning)
+    # def convert_depth_to_disparity(depth, focal_length, sensor_type, min_depth=0.01, max_depth=50):
+    #     baseline = 0.075 # sensor_to_params[sensor_type]["baseline"]
+    #     # depth_in_meters = depth / 1000.
+    #     depth_in_meters = depth
+    #     if min_depth is not None:
+    #         depth_in_meters = depth_in_meters.clip(min=min_depth, max=max_depth)
+    #     disparity = baseline * focal_length / depth_in_meters
+    #     return torch.from_numpy(disparity).float()
+    # from scipy.ndimage import zoom
+    # depth_files = ['./samples/depth/01441.h5']
+    # with h5py.File(depth_files[0], 'r') as f:
+    #     depth = np.array(f['depth'])
+    #     depth = zoom(depth, (224/depth.shape[0], 224/depth.shape[1]), order=1)
+    #     disparity = convert_depth_to_disparity(depth, 518.85790117450188, 'kv1', min_depth=0.01, max_depth=50).unsqueeze_(dim=0).to(device)
+    # inputs = {
+    #     ModalityType.DEPTH: disparity[None],
+    # }
+    # with torch.no_grad():
+    #     embeddings = model.embedder(inputs, normalize=False)
+    #     embeddings_imagebind = embeddings[ModalityType.DEPTH]
+    # cond_strength = opt.cond_strength
+    # og_c_adm = repeat(embeddings_imagebind, '1 ... -> b ...', b=batch_size) * cond_strength
+    #####
+    
     if opt.start_image is None and opt.mask is not None:
         raise RuntimeError("If mask is passed also start image must be passed")
 

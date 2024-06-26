@@ -104,8 +104,8 @@ def load_and_transform_vision_data(image_paths, device):
     return torch.stack(image_outputs, dim=0)
 
 
-def load_and_transform_thermal_data(image, device):
-    if image is None:
+def load_and_transform_thermal_data(image_path, device):
+    if image_path is None:
          return None
 
     data_transform = transforms.Compose(
@@ -115,25 +115,18 @@ def load_and_transform_thermal_data(image, device):
                 ),
                 transforms.CenterCrop(224),
                 transforms.ToTensor(),
-                transforms.Normalize(
-                    mean=(0.48145466, 0.4578275, 0.40821073),
-                    std=(0.26862954, 0.26130258, 0.27577711),
-                ),
+                # transforms.Normalize(
+                #     mean=(0.48145466, 0.4578275, 0.40821073),
+                #     std=(0.26862954, 0.26130258, 0.27577711),
+                # ),
                 transforms.Grayscale()
             ]
     )
 
     image_outputs = []
-    for img in image:
-        print(img.shape)
-        if isinstance(img, str):
-            with open(img, "rb") as fopen:
-                image = Image.open(fopen).convert("RGB")
-        else:
-            image = Image.fromarray(img)
-            print(image)
-            print("Good for you")
-
+    for img in image_path:
+        with open(img, "rb") as fopen:
+            image = Image.open(fopen).convert("RGB")
         image = data_transform(image).to(device)
         image_outputs.append(image)
     return torch.stack(image_outputs, dim=0)
