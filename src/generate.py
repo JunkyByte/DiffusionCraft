@@ -66,6 +66,13 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--cond-video",
+        type=str,
+        nargs="*",
+        help=""
+    )
+
+    parser.add_argument(
         "--cond-audio",
         type=str,
         nargs="*",
@@ -260,12 +267,15 @@ if __name__ == '__main__':
     n_prompt = '2D | | Low Quality | | text logos | | watermarks | | signatures | | out of frame | | jpeg artifacts | | ugly | | poorly drawn | | extra limbs | | extra hands | | extra feet | | backwards limbs | | extra fingers | | extra toes | | unrealistic, incorrect, bad anatomy | | cut off body pieces | | strange body positions | | impossible body positioning | | Mismatched eyes | | cross eyed | | crooked face | | crooked lips | | unclear | | undefined | | mutations | | deformities | | off center | | poor_composition | | duplicate faces, plastic, fake, human, humans, people, tiny, negativity, blurry, blurred, doll, unclear'
 
     image_paths = opt.cond_image if opt.cond_image else []
+    video_paths = opt.cond_video if opt.cond_video else []
     audio_paths = opt.cond_audio if opt.cond_audio else []
 
     if image_paths:
         print(f"Conditioning on images: {image_paths}")
     if audio_paths:
         print(f"Conditioning on audio: {audio_paths}")
+    if video_paths:
+        print(f"Conditioning on videos: {video_paths}")
 
     sample_path = os.path.join(opt.outdir, "samples")
     save_config_to_yaml(opt, os.path.join(opt.outdir, 'gen_cfg.yaml'))
@@ -289,7 +299,7 @@ if __name__ == '__main__':
     print(f"Using guidance scale: {scale}")
 
     # Prepare embeddings cond
-    num_conds = len(image_paths) + len(audio_paths)
+    num_conds = len(image_paths) + len(audio_paths) + len(video_paths)
     noise_level = opt.noise_level
     print(f"Number of conditions: {num_conds}, noise level: {noise_level}")
 
@@ -299,7 +309,11 @@ if __name__ == '__main__':
             inputs[ModalityType.VISION] = data.load_and_transform_vision_data(image_paths, device)
         if len(audio_paths):
             inputs[ModalityType.AUDIO] = data.load_and_transform_audio_data(audio_paths, device)
-            # ModalityType.DEPTH: data.load_and_transform_thermal_data([depth], device)
+        if len(video_paths):
+            if ModalityType.VISION in inputs:
+                inputs[ModalityType.VISION] = torch.cat(data.load_and_transform_video_data(video_paths, device), dim=0)
+            else:
+                inputs[ModalityType.VISION] = data.load_and_transform_video_data(video_paths, device)
 
         with torch.no_grad():  # TODO: In main_bind2 they use norm=True for audio
             embeddings_imagebind = model.embedder(inputs, normalize=False)
