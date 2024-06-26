@@ -162,3 +162,4 @@ cython_debug/
 #.idea/
 iris_conf.yaml
 src/configs.yaml
+output/
