@@ -51,7 +51,7 @@ if __name__ == '__main__':
         # rgb = Image.fromarray(np.array(f['rgb']).transpose(1, 2, 0), mode='RGB')
         # rgb.show()
         # rgb.save('./samples/imgs/test_depth.png')
-        disparity = convert_depth_to_disparity(depth, 518.85790117450188, 'kv1', min_depth=0.01, max_depth=50).unsqueeze_(dim=0).to(device)
+        disparity = convert_depth_to_disparity(depth, 518.85790117450188, 'kv1', min_depth=0.001, max_depth=10).unsqueeze_(dim=0).to(device)
 
     # Instantiate model
     model = imagebind_model.imagebind_huge(ckpt_path='/home/adryw/dataset/imagecraft/imagebind_huge.pth', pretrained=True)

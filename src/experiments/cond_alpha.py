@@ -2,16 +2,16 @@ import subprocess
 import os
 
 # Function to run the generate.py script with given parameters
-def run_experiment(prompt, prompt_idx, cond_images, cond_audio, cond_strength):
-    outdir = f"./output/cond_strength/cond_strength_{cond_strength}/index_{prompt_idx}"
+def run_experiment(prompt, prompt_idx, cond_images, cond_audio, alpha):
+    outdir = f"./output/cond_alpha/cond_alpha_{alpha}/index_{prompt_idx}"
     command = [
         "python", "src/generate.py",
         "--steps", "75",
         "--outdir", outdir,
         "--prompt", prompt,
         "--n-iter", "8",
-        "--cond-strength", str(cond_strength),
-        "--alpha", "0.5"
+        "--cond-strength", "0.9",
+        "--alpha", str(alpha)
     ]
 
     if len(cond_images):
@@ -24,7 +24,7 @@ def run_experiment(prompt, prompt_idx, cond_images, cond_audio, cond_strength):
     subprocess.run(command)
 
 # Read the input file
-input_file = 'src/experiments/cond_strength.txt'  # change this to the path of your input file
+input_file = 'src/experiments/cond_alpha.txt'  # change this to the path of your input file
 with open(input_file, 'r') as file:
     lines = file.readlines()
 
@@ -47,5 +47,5 @@ for ith, line in enumerate(lines):
     cond_audio = [os.path.join('samples/audio', f) for f in cond_audio]
 
     # Run the experiments for different cond_strength values
-    for cond_strength in [i * 0.25 for i in range(7)]:
-        run_experiment(prompt, ith, cond_images, cond_audio, cond_strength)
+    for alpha in [i * 0.1 for i in range(11)]:
+        run_experiment(prompt, ith, cond_images, cond_audio, round(alpha, 2))

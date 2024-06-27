@@ -322,7 +322,7 @@ if __name__ == '__main__':
 
         if num_conds == 2:
             alpha = opt.alpha
-            if len(image_paths) and len(audio_paths):
+            if (len(image_paths) or len(video_paths)) and len(audio_paths):
                 embeddings_imagebind = alpha * embeddings_imagebind[ModalityType.VISION] + (1 - alpha) * embeddings_imagebind[ModalityType.AUDIO]
                 print(f"Using alpha blending: alpha={alpha}")
             else:

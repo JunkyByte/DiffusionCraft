@@ -1,0 +1,11 @@
+"A photo" car_image.jpg rain.wav
+"A landscape photo" sunflowers.jpeg rain.wav
+"A photo of a landscape" thunder-124463.mp3 bird_audio.wav
+"A painting" car_image.jpg nature-sounds-water-forest-crickets-calm-2496-hq-chakongaudio-169888.mp3
+"Geometrical art of autumn landscape, warm colors, a work of art, grotesque, Mysterious" boat.jpeg pointillism.jpeg
+"red dragon in the waves art print, in the style of kōji morimoto, neo-traditional japanese, john blanche, murals and wall drawings, tyler walpole, intense close-ups, absurdist --ar 71:128 --stylize 750 --v 5. 2" cubism.jpeg fire.jpeg
+"illustration, upper-body, girl, front, face, gaze, two randomly three limit colors, outline, edges lines, pattern backdrop, original, masterpiece --ar 9:16 --style raw --stylize 300" japan_girl.webp flowers.jpg
+"An impressionistic design, mountain, peach trees, dreamlike atmosphere, shaded by soft pastel natural light, by Adrian Smith, Blacklight, viewed from a tranquil meadow --v 6. 0 --style raw --s 250 --ar 1:" boat.jpeg thunder-124463.mp3
+"A dreamy illustration of an infinite staircase leading to the universe, with books and characters on each step. The figure at its center is walking up it, symbolizing continuous learning in the style of magic realism. Dark tones and glowing light create depth, while swirling patterns suggest vastness. --ar 59:82 --v 6. 0" dali.png infinite_stairs.png
+"Japanese girl, 18-21 years old, brown hair, high-quality photo portrait, shot on a Polaroid camera, double eyelid --ar 34:65 --style raw" japan_girl.webp flowers.jpg
+"A photo" horse-clip-clopping-downhill-stereo-33768.mp3 bird_audio.wav
